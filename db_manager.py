@@ -93,6 +93,86 @@ def add_printjob(order_id, item_name, filament_used_g, print_time_min):
     con.commit()
     con.close()
 
+def get_customers():
+    con = sqlite3.connect("database.db")
+    cur = con.cursor()
+
+    cur.execute("SELECT customer_id, customer_name FROM Customer")
+    rows = cur.fetchall()
+
+    con.close()
+    return rows  # list of (id, name)
+
+def get_orders_for_customer(customer_id):
+    con = sqlite3.connect("database.db")
+    cur = con.cursor()
+
+    cur.execute("""
+        SELECT order_id, order_date, total_cost
+        FROM T_Order
+        WHERE customer_id = ?
+    """, (customer_id,))
+
+    rows = cur.fetchall()
+    con.close()
+    return rows
+
+def get_printjobs_for_order(order_id):
+    con = sqlite3.connect("database.db")
+    cur = con.cursor()
+
+    cur.execute("""
+        SELECT item_name, filament_used_g, print_time_min
+        FROM PrintJob
+        WHERE order_id = ?
+    """, (order_id,))
+
+    rows = cur.fetchall()
+    con.close()
+    return rows
+
+def recalculate_order_cost(order_id, filament_cost_per_kg):
+    con = sqlite3.connect("database.db")
+    cur = con.cursor()
+
+    # Get all printjobs for this order
+    cur.execute("""
+        SELECT filament_used_g, print_time_min
+        FROM PrintJob
+        WHERE order_id = ?
+    """, (order_id,))
+    jobs = cur.fetchall()
+
+    total_filament_g = sum(row[0] or 0 for row in jobs)
+    total_time_min = sum(row[1] or 0 for row in jobs)
+
+    filament_cost = (total_filament_g / 1000) * filament_cost_per_kg
+    maintenance_cost = total_time_min * 0.01  # ← tweak this rate later
+
+    # Get base order costs
+    cur.execute("""
+        SELECT delivery_cost, other_jobs_cost, markup_percentage
+        FROM T_Order
+        WHERE order_id = ?
+    """, (order_id,))
+    delivery_cost, other_jobs_cost, markup_pct = cur.fetchone()
+
+    subtotal = filament_cost + delivery_cost + other_jobs_cost + maintenance_cost
+    markup = subtotal * (markup_pct / 100)
+    total = subtotal + markup
+
+    # Update the order
+    cur.execute("""
+        UPDATE T_Order
+        SET maintenance_cost = ?,
+            total_cost = ?
+        WHERE order_id = ?
+    """, (maintenance_cost, total, order_id))
+
+    con.commit()
+    con.close()
+
+
 # __TABLES__
 """
 CREATE TABLE IF NOT EXISTS Customer (

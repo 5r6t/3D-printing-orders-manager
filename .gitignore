@@ -1,1 +1,4 @@
 database.db
+example.gcode
+.dist
+__pycache__
